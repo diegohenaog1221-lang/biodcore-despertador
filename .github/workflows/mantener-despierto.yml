@@ -1,152 +1,116 @@
 name: Mantener despierto Supabase
 
 # El proyecto de Supabase de BIODCORE se enfria cuando no se usa, y su primera
-# respuesta despues de ese reposo es DEVASTADORA. Medido el 17 de septiembre de
-# 2026, cuatro consultas seguidas contra la base:
+# respuesta despues de ese reposo es DEVASTADORA: 34,5 s la primera consulta,
+# 1,75 la segunda, 0,41 la tercera. Netlify corta mucho antes, asi que quien
+# abria la aplicacion tras un rato no veia una pantalla lenta: no veia
+# pantalla.
 #
-#   consulta 1:  34.509 ms      <-- primera, en frio
-#   consulta 2:   1.754 ms
-#   consulta 3:     406 ms
-#   consulta 4:     391 ms
+# ─────────────────────────────────────────────────────────────────────────────
+# CADA EJECUCION PINGEA DURANTE DIECISIETE HORAS, Y ESA ES LA CORRECCION
+# ─────────────────────────────────────────────────────────────────────────────
 #
-# Treinta y cuatro segundos y medio. Netlify corta mucho antes, asi que quien
-# abriera la aplicacion despues de un rato de inactividad no veia una pantalla
-# lenta: no veia pantalla.
+# El `cron` de abajo pide 288 ejecuciones al dia. GITHUB DISPARA 5,7. En los
+# repositorios publicos el evento `schedule` es de mejor esfuerzo y se descarta
+# bajo carga; medido sobre las 61 ejecuciones de once dias, el hueco mediano
+# fue de 254 minutos y el mayor de 428 — y LAS 61 SALIERON EN VERDE. Con eso
+# la base estaba fria el 90,3% del tiempo mientras el ping decia que todo iba
+# bien.
 #
-# SE PINGEAN LAS DOS COSAS, Y ESA ES LA CORRECCION.
+# Asi que lo que se arregla no es el intervalo: es cuanto DURA cada ejecucion.
+# El trabajo ya no son diez segundos sino un bucle que pingea cada cinco
+# minutos durante 340, y van TRES ENCADENADOS: 1.020 minutos, diecisiete
+# horas. GitHub solo tiene que acertar un disparo cada diecisiete horas, que
+# es de sobra lo que hace.
 #
-# La version anterior solo consultaba /auth/v1/health. Mantenia despierta la
-# autenticacion (9,1 s en frio, 0,3 s despues) y dejaba la BASE DE DATOS
-# congelandose, que es donde estaban los treinta y cuatro segundos. Se cubria
-# el 21% del problema y se daba por resuelto el 100%: el ping salia verde
-# todas las veces mientras la aplicacion se caia.
+#   cobertura por disparo      huecos sin cubrir de los 60 medidos
+#   ───────────────────────    ───────────────────────────────────
+#   10 s     · lo de antes     60 de 60   · fria el 90,3% del tiempo
+#   340 min  · un trabajo      13 de 60   · fria el 2,8%
+#   1.020 min · TRES           0 de 60
 #
-# De ahi que ahora se mida cada servicio POR SEPARADO y se avise por separado.
-# Un despertador que solo comprueba lo que ya funciona es peor que no tenerlo,
-# porque da confianza.
+# SON TRES TRABAJOS Y NO UNO LARGO porque GitHub corta un trabajo a las SEIS
+# HORAS. Una ejecucion entera puede durar mucho mas, asi que se encadenan con
+# `needs`: cada uno arranca cuando acaba el anterior.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# VERAS EJECUCIONES CANCELADAS, Y ES LO NORMAL
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# `cancel-in-progress` tira la ejecucion en curso cuando entra una nueva: la
+# nueva toma el relevo en el acto y reinicia las diecisiete horas, que es lo
+# que se busca. En la pestaña Actions eso se ve como ejecuciones CANCELADAS.
+# No son fallos — son la anterior cediendo el turno. Lo que SI hay que mirar
+# es que haya una EN CURSO casi siempre.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # POR QUE ESTE ARCHIVO VIVE EN UN REPOSITORIO PUBLICO Y APARTE
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# Estuvo dentro del repositorio de BIODCORE, que es PRIVADO, y ahi no puede
-# funcionar. GitHub regala 2.000 minutos de Actions al mes en repositorios
-# privados y cobra UN MINUTO MINIMO POR EJECUCION, aunque la ejecucion dure
-# diez segundos:
+# EN UN REPOSITORIO PUBLICO LOS MINUTOS SON ILIMITADOS, y eso es justo lo que
+# hace posible el bucle. En uno PRIVADO GitHub regala 2.000 minutos al mes:
+# un solo trabajo de 340 minutos se llevaria el 17% de la cuota mensual y
+# tres, la mitad. No cabe de ninguna manera.
 #
-#   288 ejecuciones/dia x 1 min = 288 min/dia  ->  la cuota dura ~7 dias
-#
-# El resto del mes las ejecuciones fallaban, y llegaba un correo de error. Y
-# bajar el intervalo no es salida: a cada 25 minutos si cabria en la cuota,
-# pero veinticinco minutos de reposo bastan para volver a enfriarse, asi que
-# seria gastar la cuota entera para no resolver nada.
-#
-# EN UN REPOSITORIO PUBLICO LOS MINUTOS SON ILIMITADOS. Por eso este archivo
-# vive solo, aqui: no hay nada de BIODCORE en este repositorio, y no hace
-# falta que lo haya.
-#
+# Aqui no hay nada de BIODCORE: solo este archivo y el script que llama.
 # LAS DOS VARIABLES SON SECRETOS DE *ESTE* REPOSITORIO, no del de BIODCORE.
 #
 # QUE AQUI NO ENTRE NUNCA LA LLAVE DE SERVICIO. La llave `anon` es publica por
-# diseno —viaja en el JavaScript que descarga cualquier navegador— y ademas las
-# tablas tienen RLS activado sin politicas, asi que con ella no se puede leer
-# nada: comprobado, la base responde 401. La llave de servicio se salta RLS
-# entera y no pinta en un despertador.
+# diseño —viaja en el JavaScript que descarga cualquier navegador— y ademas
+# las tablas tienen RLS activado sin politicas, asi que con ella no se puede
+# leer nada: comprobado, la base responde 401. La llave de servicio se salta
+# RLS entera y no pinta en un despertador.
 
 on:
   schedule:
-    # Cada cinco minutos es el intervalo minimo que admite GitHub. En la
-    # practica se retrasa a menudo, asi que conviene que el margen sea amplio.
+    # Cada cinco minutos es el intervalo minimo que admite GitHub. EN LA
+    # PRACTICA DISPARA UNA VEZ CADA CUATRO HORAS —medido— y por eso cada
+    # ejecucion cubre diecisiete. Se deja en */5 porque cuanto mas a menudo
+    # lo intente, antes relevara a la que este corriendo.
     - cron: "*/5 * * * *"
   workflow_dispatch:
+  # Empujar un commit arranca una ejecucion en el acto. Es lo que permite
+  # comprobar un cambio sin esperar al reloj — y lo que reinicia el contador
+  # de los 60 dias de inactividad.
+  push:
+    branches: [main]
 
-# Si una ejecucion se retrasa y se solapa con la siguiente, se descarta la
-# vieja: llegar tarde a despertar un servicio no sirve de nada.
+# Si entra una ejecucion nueva, la vieja se cancela: llegar tarde a despertar
+# un servicio no sirve de nada, y la nueva reinicia las diecisiete horas.
 concurrency:
   group: mantener-despierto
   cancel-in-progress: true
 
+# El bucle vive en despertar.sh, EN UN SOLO SITIO. Escrito dentro de cada
+# trabajo serian tres copias de la misma cuenta, y basta que una se quede sin
+# pingear la base para que el relevo de turno deje de mantenerla caliente sin
+# que nada lo delate.
+env:
+  SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+  SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+  DURACION_MIN: "340"
+  INTERVALO: "300"
+
 jobs:
-  despertar:
+  tramo-1:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
-
+    timeout-minutes: 350
     steps:
-      - name: Despertar autenticación y base de datos
-        env:
-          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-        run: |
-          set -uo pipefail
+      - uses: actions/checkout@v4
+      - run: bash despertar.sh
 
-          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ]; then
-            echo "::error::Faltan los secretos NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY en ESTE repositorio."
-            echo "Settings → Secrets and variables → Actions → New repository secret."
-            exit 1
-          fi
+  tramo-2:
+    needs: tramo-1
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash despertar.sh
 
-          # Devuelve "codigo ms". El tiempo se mide aqui y no con
-          # %{time_total} para incluir tambien el fallo de conexion, que es
-          # justo el caso lento.
-          consultar() {
-            local ruta="$1"
-            local inicio codigo
-            inicio=$(date +%s%3N)
-            codigo=$(curl -s -o /dev/null -w "%{http_code}" --max-time 45 \
-              -H "apikey: ${SUPABASE_ANON_KEY}" \
-              "${SUPABASE_URL}${ruta}") || codigo="000"
-            echo "${codigo} $(( $(date +%s%3N) - inicio ))"
-          }
-
-          # --- Autenticación -------------------------------------------------
-          read -r cod_auth ms_auth <<< "$(consultar "/auth/v1/health")"
-          echo "autenticación: ${cod_auth} en ${ms_auth} ms"
-
-          # --- Base de datos -------------------------------------------------
-          #
-          # Se pide UNA columna de UNA fila de la tabla mas grande. La peticion
-          # llega hasta PostgreSQL y es PostgreSQL quien la rechaza: RLS esta
-          # activado sin politicas, asi que el rol `anon` no puede leer nada y
-          # la respuesta es 401.
-          #
-          # Ese rechazo es exactamente lo que se busca. Prueba que la conexion
-          # llego a la base —que es lo que la mantiene caliente— y de paso
-          # verifica cada cinco minutos que RLS sigue puesto. Un 200 aqui seria
-          # una emergencia: significaria que las tablas quedaron abiertas a
-          # cualquiera con la llave publica.
-          read -r cod_bd ms_bd <<< "$(consultar "/rest/v1/Material?select=id&limit=1")"
-          echo "base de datos:  ${cod_bd} en ${ms_bd} ms"
-
-          # --- Avisos --------------------------------------------------------
-          #
-          # Ninguno tumba el trabajo. Que un servicio este caido un momento no
-          # es un fallo de este proceso, y un correo de error cada cinco
-          # minutos se acaba por ignorar, que es como se pierde la senal buena.
-
-          if [ "${cod_bd}" = "200" ]; then
-            echo "::error::La base de datos devolvió 200 a la llave pública: RLS no está protegiendo la tabla Material."
-          elif [ "${cod_bd}" != "401" ] && [ "${cod_bd}" != "403" ]; then
-            echo "::warning::La base de datos respondió ${cod_bd} (se esperaba 401 por RLS)"
-          fi
-
-          if [ "${cod_auth}" != "200" ]; then
-            echo "::warning::La autenticación respondió ${cod_auth}"
-          fi
-
-          # El umbral es el que distingue "despierto" de "se habia dormido".
-          # Con la base caliente se midieron 400 ms; tres segundos deja margen
-          # de sobra sin dejar pasar un arranque en frio.
-          #
-          # LOS AVISOS NO TUMBAN EL TRABAJO, asi que el paso termina SIEMPRE en
-          # verde salvo que falten los secretos. El `exit 0` es explicito: sin
-          # el, el estado del paso seria el de la ultima comparacion del bucle,
-          # y una comparacion con un valor vacio devuelve 2 y tumbaria el
-          # trabajo por un aviso que no es un fallo.
-          for par in "autenticación:${ms_auth}" "base de datos:${ms_bd}"; do
-            ms="${par##*:}"
-            if [ -n "${ms}" ] && [ "${ms}" -gt 3000 ] 2>/dev/null; then
-              echo "::warning::${par%%:*} tardó ${ms} ms: seguía fría pese al mantenimiento"
-            fi
-          done
-
-          exit 0
+  tramo-3:
+    needs: tramo-2
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash despertar.sh
