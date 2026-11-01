@@ -1,0 +1,9 @@
+# EL SCRIPT CORRE EN LINUX Y UN `\r` LO REVIENTA.
+#
+# Se edita desde Windows, donde `core.autocrlf` deja CRLF en el archivo, y el
+# commit se lo llevaba tal cual al repositorio: las 154 lineas con CR. En
+# ubuntu-latest eso no es un detalle de formato, es un fallo duro —
+# `$'\r': command not found` — y no aparece hasta la primera ejecucion.
+#
+# Con esto el repositorio guarda LF siempre, se edite desde donde se edite.
+* text=auto eol=lf
