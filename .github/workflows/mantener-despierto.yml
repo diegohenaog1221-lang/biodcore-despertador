@@ -95,16 +95,22 @@ env:
   # CADENCIA, y se midió después: con el bucle de un minuto ya corriendo,
   # ocho consultas sueltas dieron 15,4 / 13,1 / 5,2 / 50,8 / 23,1 / 30,9 /
   # 12,1 / 7,9 segundos. CINCUENTA SEGUNDOS CON UN PING ENTRANDO CADA
-  # SESENTA: no arregló nada.
+  # SESENTA: no arregló nada, así que vuelve a 300.
   #
-  # La causa de verdad salió del panel de Supabase, no de aquí: el plan
-  # gratuito se quedó SIN CUOTA y su periodo de gracia terminó, así que
-  # Supabase limita el proyecto. Por eso la autenticación iba perfecta
-  # —es barata— y la base se arrastraba.
+  # Y LA SEGUNDA CONJETURA TAMBIÉN FUE FALSA, que conviene escribirlo: el
+  # panel de Supabase enseñaba «Grace period is over — your projects will
+  # not be able to serve requests when you use up your quota» y se dio por
+  # hecho que era eso. Es un aviso CONDICIONAL. Mirada la página de Usage,
+  # no hay ninguna cuota pasada: base 12%, egress 6%, storage 11%.
   #
-  # Y por eso vuelve a 300: a un proyecto limitado por exceso de cuota no se
-  # le mete más tráfico. Lo que de verdad arregla el despertador es la
-  # DURACIÓN —17 h de cobertura por disparo— y eso no cambia.
+  # Lo que queda —y encaja con todo lo medido— es el PRESUPUESTO DE DISK IO
+  # del plan gratuito, que NO sale en esa página sino en Reports. Con él
+  # agotado la instancia se arrastra durante horas, y la autenticación
+  # sigue perfecta porque apenas toca disco: medido intercalado siete veces,
+  # auth mediana 0,57 s contra 10,12 de la base, 18 veces más lenta.
+  #
+  # Eso no lo arregla ningún despertador. Lo que este archivo arregla es la
+  # DURACIÓN —17 h de cobertura por disparo— y eso sigue en pie.
   INTERVALO: "300"
 
 jobs:
