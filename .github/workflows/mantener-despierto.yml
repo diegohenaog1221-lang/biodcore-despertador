@@ -18,8 +18,8 @@ name: Mantener despierto Supabase
 # bien.
 #
 # Asi que lo que se arregla no es el intervalo: es cuanto DURA cada ejecucion.
-# El trabajo ya no son diez segundos sino un bucle que pingea cada cinco
-# minutos durante 340, y van TRES ENCADENADOS: 1.020 minutos, diecisiete
+# El trabajo ya no son diez segundos sino un bucle que pingea cada minuto
+# durante 340, y van TRES ENCADENADOS: 1.020 minutos, diecisiete
 # horas. GitHub solo tiene que acertar un disparo cada diecisiete horas, que
 # es de sobra lo que hace.
 #
@@ -89,7 +89,22 @@ env:
   SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
   DURACION_MIN: "340"
-  INTERVALO: "300"
+  # UN PING CADA CINCO MINUTOS NO LO MANTIENE RAPIDO, y esta medido el 1 de
+  # noviembre de 2026 CON EL BUCLE YA CORRIENDO: trece lecturas sueltas cada
+  # 30 s dieron 0,87 / 2,9 / 3,5 / 4,5 / 6,7 / 7,9 / 8,7 / 12,7 / 13,7 / 15,4
+  # / 21,8 / 25,0 / 40,0 segundos. Suben 7 de 12 veces, asi que NO es un
+  # arranque en frio —ese baja siempre, 34,5 -> 1,75 -> 0,41— sino un proyecto
+  # que se cae del camino rapido en cuanto deja de llegarle trafico.
+  #
+  # Con peticiones seguidas baja a 0,3 s y se queda ahi, asi que lo que lo
+  # sostiene es la CADENCIA. Un minuto es lo mas bajo que tiene sentido sin
+  # convertir esto en una carga, y aqui los minutos son gratis.
+  #
+  # NO CUESTA CUOTA DE LA BASE: la consulta la rechaza RLS antes de leer
+  # ninguna fila, asi que no gasta presupuesto de Disk IO. Eso importa porque
+  # en el plan gratuito ese presupuesto se agota y la base se arrastra durante
+  # horas — y entonces esto no lo arregla ningun despertador.
+  INTERVALO: "60"
 
 jobs:
   tramo-1:
