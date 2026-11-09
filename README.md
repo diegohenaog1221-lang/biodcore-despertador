@@ -1,9 +1,18 @@
 # Despertador de Supabase — BIODCORE
 
-Este repositorio contiene **dos archivos**: un trabajo de GitHub Actions y el
-script que llama, para que el proyecto de Supabase de BIODCORE no se enfríe.
+Este repositorio contiene **un trabajo de GitHub Actions y el script que**
+**llama**, y hace dos cosas con el mismo bucle:
 
-**Aquí no hay código de BIODCORE, ni datos, ni credenciales.** Es público por
+1. que el proyecto de Supabase de BIODCORE **no se enfríe**;
+2. y disparar sus **recordatorios de tareas**, que es lo que los hace llegar
+   al teléfono. Ver «Y de paso dispara los recordatorios», más abajo.
+
+**Aquí no hay código de BIODCORE ni un solo dato suyo.** Y de credenciales,
+sólo las que no abren nada: la llave `anon` —que es pública por diseño— y un
+token que no sirve para nada más que para llamar a una ruta. **La llave de
+servicio no entra aquí bajo ningún concepto**, y eso tiene su propia sección.
+
+Es público por
 un motivo concreto y es el único que importa: **en un repositorio público los
 minutos de Actions son ilimitados**, y este trabajo los gasta a manos llenas.
 En uno privado GitHub regala 2.000 al mes, así que una sola ejecución de 340
@@ -97,6 +106,50 @@ de las de la lista.
 Cada ejecución deja además su resumen: cuántos pings hizo, cuántos minutos
 cubrió y cuál fue la peor respuesta de la base.
 
+## Y de paso dispara los recordatorios de tareas
+
+BIODCORE avisa al teléfono cuando vence el recordatorio de una tarea, y el
+aviso sale de aquí. **Lo caro de una notificación push no son las claves: es
+tener algo que mire cada poco qué venció** — y ahí BIODCORE no podía de
+ninguna de las dos formas obvias:
+
+| | Por qué no |
+|---|---|
+| una función de Netlify | **no hay cron**, y muere a los 10 segundos |
+| un cron en SU repositorio | es privado: GitHub **cobra un minuto por ejecución** aunque dure diez segundos, así que 288 al día se comen los 2.000 del mes en una semana |
+
+Aquí los minutos son ilimitados y **el bucle ya estaba corriendo**. Es trabajo
+hecho y pagado: una línea más por iteración.
+
+**AQUÍ NO ENTRA NINGUNA CREDENCIAL DE LA BASE, y esa regla no se toca.** Lo
+único que hace falta es `TOKEN_RECORDATORIOS`, que **no abre nada más que esa
+ruta**: quien lee la base y firma los envíos es el servidor de BIODCORE, con
+sus llaves de siempre.
+
+**ES OPCIONAL, y eso importa.** Sin el secreto, el script lo dice **una vez** y
+sigue pingeando la base. Un bucle que se negara a arrancar porque falta un
+secreto que no es suyo dejaría la base congelándose, que es justo lo que este
+repositorio existe para evitar.
+
+**Y NO PUEDE TUMBAR EL BUCLE.** Un fallo de red de esa llamada no es un fallo
+de este proceso: un recordatorio que llega tarde es un problema, **una base
+congelada es que nadie entra**. De ahí que la función se coma su propio error.
+
+### La puntualidad no se promete; que no se pierda, sí
+
+El bucle mira cada **cinco minutos** (`INTERVALO`), así que un recordatorio
+puesto a las 9:00 llega entre las 9:00 y las 9:05.
+
+**LO QUE SÍ ESTÁ GARANTIZADO ES QUE NO SE PIERDE.** El servidor de BIODCORE
+marca como enviado **sólo lo que logró entregar**, así que un disparo
+retrasado entrega el aviso tarde, no deja de entregarlo. Y si no hay ningún
+dispositivo suscrito, **no lo marca**: se queda esperando a que alguien dé
+permiso.
+
+Lo único que se descarta es lo **muy** viejo —más de doce horas—: un aviso de
+hace tres días no recuerda nada, y cuarenta notificaciones de golpe el lunes
+se leen como un fallo del programa. Eso sigue en la campana de la aplicación.
+
 ## Puesta en marcha
 
 En **Settings → Secrets and variables → Actions → New repository secret**, de
@@ -106,14 +159,28 @@ este repositorio:
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | La dirección del proyecto en Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | La llave pública (`anon`) |
+| `TOKEN_RECORDATORIOS` | **Opcional.** El token con el que se llama a `/api/recordatorios` de BIODCORE. Sin él los recordatorios no se disparan y lo demás funciona igual |
+
+**UN SECRETO SE LEE CUANDO ARRANCA EL TRABAJO, NO DURANTE.** Añadirlo mientras
+hay una ejecución en curso no la cambia: ésa sigue sus 340 minutos sin él.
+Hay que arrancar una nueva —con `Run workflow` o con un `push`— y entonces la
+vieja cede el turno sola.
 
 Después, **Actions → Mantener despierto Supabase → Run workflow** para
 comprobarlo sin esperar al reloj. El registro debe decir algo como:
 
 ```
-13:53:28  auth 200 en   448 ms   base 401 en   1190 ms
-13:53:43  auth 200 en   372 ms   base 401 en   1127 ms
+13:53:28  auth 200 en   448 ms   base 401 en   1190 ms   recordatorios 200
+13:53:43  auth 200 en   372 ms   base 401 en   1127 ms   recordatorios 200
 ```
+
+Esa última columna dice tres cosas distintas:
+
+| | |
+|---|---|
+| **`200`** | el token entró y los recordatorios se están disparando |
+| **`-`** | no hay `TOKEN_RECORDATORIOS`: el script lo dice al empezar, con la ruta para ponerlo |
+| **`401`** | el token no coincide con el del servidor · **`503`**, que faltan las claves de push en Netlify |
 
 **Un `push` a `main` también lo arranca**, que es lo que permite comprobar un
 cambio en el acto — y lo que reinicia el contador de los 60 días.
