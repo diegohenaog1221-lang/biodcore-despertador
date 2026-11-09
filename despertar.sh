@@ -59,12 +59,41 @@
 #   signInWithPassword .............. 504 a los 35 s, tres veces seguidas
 #
 # La autenticacion contestaba en dos decimas y la base no contestaba.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Y DE PASO DISPARA LOS RECORDATORIOS DE TAREAS DE BIODCORE
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# No es cosa de un despertador, y vive aqui por una razon concreta: lo caro
+# de una notificacion push no son las claves, es TENER ALGO QUE MIRE CADA
+# POCO QUE VENCIO. Y ahi BIODCORE no podia de ninguna de las dos formas
+# obvias:
+#
+#   una funcion de Netlify ...... no hay cron, y muere a los 10 segundos
+#   un cron en SU repositorio ... es privado: GitHub cobra un minuto por
+#                                 ejecucion aunque dure diez segundos, asi
+#                                 que 288 al dia se comen los 2.000 del mes
+#                                 en una semana
+#
+# Aqui los minutos son ilimitados y el bucle YA ESTA CORRIENDO. Es trabajo
+# hecho y pagado.
+#
+# AQUI NO ENTRA NINGUNA CREDENCIAL DE LA BASE, y esa regla no se toca. Lo
+# unico que hace falta es TOKEN_RECORDATORIOS, que no abre nada mas que esa
+# ruta: quien lee la base y firma los envios es el servidor de BIODCORE, con
+# sus llaves de siempre.
+#
+# ES OPCIONAL. Sin el token los recordatorios no se disparan y el despertador
+# de la base sigue funcionando igual — se dice UNA vez al empezar y se sigue.
+# Al contrario seria peor: un bucle que se niega a arrancar porque falta un
+# secreto que no es suyo dejaria la base congelandose.
 
 set -uo pipefail
 
 INTERVALO="${INTERVALO:-300}"
 DURACION_MIN="${DURACION_MIN:-340}"
 LENTO_MS="${LENTO_MS:-3000}"
+RECORDATORIOS_URL="${RECORDATORIOS_URL:-https://biodcore.com/api/recordatorios}"
 
 if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ]; then
   echo "::error::Faltan los secretos NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY en ESTE repositorio."
@@ -83,12 +112,40 @@ consultar() {
   echo "${codigo} $(( $(date +%s%3N) - inicio ))"
 }
 
+# Dispara los recordatorios de tareas de BIODCORE. Devuelve el codigo, o
+# "-" si no hay token: entonces no se llama a nada.
+#
+# -m 20 PORQUE LA FUNCION DE NETLIFY MUERE A LOS DIEZ: esperar mas es
+# esperar a algo que ya no esta.
+#
+# Y NO PUEDE TUMBAR EL BUCLE. Un fallo de red aqui no es un fallo de este
+# proceso, y llevarselo por delante pararia el despertador DE LA BASE, que
+# es lo que de verdad no puede pararse: un recordatorio que llega tarde es
+# un problema; una base congelada es que nadie entra.
+recordatorios() {
+  if [ -z "${TOKEN_RECORDATORIOS:-}" ]; then echo "-"; return 0; fi
+  local codigo
+  codigo=$(curl -s -o /dev/null -w "%{http_code}" -m 20 -X POST \
+    -H "x-token-recordatorios: ${TOKEN_RECORDATORIOS}" \
+    "${RECORDATORIOS_URL}") || codigo="000"
+  echo "${codigo}"
+}
+
 inicio=$(date +%s)
 fin=$(( inicio + DURACION_MIN * 60 ))
 
 pings=0; lentos=0; fallos=0; peor=0
+rec_ok=0; rec_fallos=0
 
 echo "despertando cada ${INTERVALO}s durante ${DURACION_MIN} min"
+
+# SE DICE UNA VEZ Y NO EN CADA ITERACION: sesenta y ocho avisos iguales no
+# se leen, y entonces el que si importa pasa con los demas.
+if [ -z "${TOKEN_RECORDATORIOS:-}" ]; then
+  echo "sin TOKEN_RECORDATORIOS: los recordatorios de tareas NO se disparan."
+  echo "  Settings -> Secrets and variables -> Actions -> New repository secret."
+  echo "  El despertador de la base funciona igual."
+fi
 echo
 
 while [ "$(date +%s)" -lt "$fin" ]; do
@@ -109,9 +166,22 @@ while [ "$(date +%s)" -lt "$fin" ]; do
   # decir que las tablas quedaron abiertas a cualquiera con la llave publica.
   read -r cod_bd ms_bd <<< "$(consultar "/rest/v1/Material?select=id&limit=1")"
 
+  # --- Los recordatorios de tareas de BIODCORE ------------------------------
+  cod_rec=$(recordatorios)
+  if [ "$cod_rec" = "200" ]; then
+    rec_ok=$(( rec_ok + 1 ))
+  elif [ "$cod_rec" != "-" ]; then
+    rec_fallos=$(( rec_fallos + 1 ))
+    # El primero sale como aviso, por lo mismo que el de la base lenta. Un
+    # 401 aqui es el token descuadrado; un 503, que faltan las claves VAPID
+    # en Netlify. En los dos casos el aviso no se pierde: se envia cuando
+    # vuelva a cuadrar, porque el servidor solo marca lo que logro enviar.
+    [ "$rec_fallos" -eq 1 ] && echo "::warning::los recordatorios contestaron ${cod_rec}: revisa TOKEN_RECORDATORIOS y las claves VAPID"
+  fi
+
   pings=$(( pings + 1 ))
-  printf '%s  auth %s en %5s ms   base %s en %6s ms\n' \
-    "$(date -u +%H:%M:%S)" "$cod_auth" "$ms_auth" "$cod_bd" "$ms_bd"
+  printf '%s  auth %s en %5s ms   base %s en %6s ms   recordatorios %s\n' \
+    "$(date -u +%H:%M:%S)" "$cod_auth" "$ms_auth" "$cod_bd" "$ms_bd" "$cod_rec"
 
   if [ "${cod_bd}" = "200" ]; then
     echo "::error::La base devolvió 200 a la llave pública: RLS no está protegiendo la tabla Material."
@@ -135,6 +205,7 @@ done
 
 echo
 echo "${pings} pings · ${lentos} por encima de ${LENTO_MS} ms · ${fallos} respuestas inesperadas · la peor, ${peor} ms"
+echo "recordatorios: ${rec_ok} disparos correctos · ${rec_fallos} con respuesta inesperada"
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
@@ -145,6 +216,8 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "| por encima de ${LENTO_MS} ms | ${lentos} |"
     echo "| respuestas inesperadas | ${fallos} |"
     echo "| la peor | ${peor} ms |"
+    echo "| recordatorios disparados | ${rec_ok} |"
+    echo "| recordatorios con fallo | ${rec_fallos} |"
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 

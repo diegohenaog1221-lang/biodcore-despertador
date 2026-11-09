@@ -53,7 +53,13 @@ name: Mantener despierto Supabase
 # tres, la mitad. No cabe de ninguna manera.
 #
 # Aqui no hay nada de BIODCORE: solo este archivo y el script que llama.
-# LAS DOS VARIABLES SON SECRETOS DE *ESTE* REPOSITORIO, no del de BIODCORE.
+# LAS TRES VARIABLES SON SECRETOS DE *ESTE* REPOSITORIO, no del de BIODCORE.
+#
+# Y LA TERCERA ES LA QUE DISPARA LOS RECORDATORIOS DE TAREAS: el bucle llama
+# tambien a /api/recordatorios de BIODCORE, porque lo caro de un aviso push
+# no son las claves sino tener algo que mire cada poco que vencio — y aqui ya
+# hay un bucle corriendo. `TOKEN_RECORDATORIOS` no abre nada mas que esa
+# ruta, y es OPCIONAL: sin el, el despertador de la base funciona igual.
 #
 # QUE AQUI NO ENTRE NUNCA LA LLAVE DE SERVICIO. La llave `anon` es publica por
 # diseño —viaja en el JavaScript que descarga cualquier navegador— y ademas
@@ -88,6 +94,10 @@ concurrency:
 env:
   SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+  # OPCIONAL. Sin este secreto el script lo dice una vez y sigue pingeando
+  # la base: un bucle que se niega a arrancar porque falta un secreto que
+  # no es suyo dejaria la base congelandose.
+  TOKEN_RECORDATORIOS: ${{ secrets.TOKEN_RECORDATORIOS }}
   DURACION_MIN: "340"
   # CINCO MINUTOS, Y ESTUVO EN UNO POR UNA CONJETURA FALSA.
   #
